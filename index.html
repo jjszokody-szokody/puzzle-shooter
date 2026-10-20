@@ -292,27 +292,6 @@ function bframe(x,y,w,h){ctx.fillStyle='rgba(0,0,0,.4)';rr(x-10,y-10,w+20,h+20,1
 function tbtn(R,label,col,on){rr(R.x,R.y,R.w,R.h,R.h*0.3);const g=ctx.createLinearGradient(0,R.y,0,R.y+R.h);g.addColorStop(0,shade(col,on?45:25));g.addColorStop(1,shade(col,on?-10:-40));ctx.fillStyle=g;ctx.fill();ctx.lineWidth=on?3:2;ctx.strokeStyle=on?'#fff':'rgba(255,255,255,.45)';ctx.stroke();txt(label,R.x+R.w/2,R.y+R.h/2,Math.min(R.h*0.45,22),'#fff','center',R.w-8)}
 const timerHud=s=>`Time ${Math.max(0,s.time).toFixed(0)}s`;
 function tick(s,dt){if(s.status==='play'&&s.time!==undefined){s.time-=dt;if(s.time<=0){s.time=0;s.status='fail'}}}
-// ---------- SLIDING TILES ----------
-function Slider(L){
- const N=L<20?3:L<60?4:5,k=Math.round((N===3?16:N===4?30:42)+L*0.45);
- let t,b,hist;const solved=()=>t.every((v,i)=>v===(i+1)%(N*N));
- do{t=[];for(let i=0;i<N*N;i++)t.push((i+1)%(N*N));b=N*N-1;hist=[b];let prev=-1;
-  for(let i=0;i<k;i++){const r=Math.floor(b/N),c=b%N,nb=[];if(r>0)nb.push(b-N);if(r<N-1)nb.push(b+N);if(c>0)nb.push(b-1);if(c<N-1)nb.push(b+1);const n=pick(nb.filter(x=>x!==prev));t[b]=t[n];t[n]=0;prev=b;b=n;hist.push(b)}}while(solved());
- const limit=Math.max(k+8,Math.round(k*(2.3-L*0.007))+10);
- const s={status:'play',name:'Sliding Tiles',goal:`Put the tiles in order (1 to ${N*N-1}) in ${limit} moves`,moves:0,limit,score:0};
- let cell=40,ox=0,oy=0,anim={};
- s.layout=()=>{({cell,ox,oy}=BL(N,N))};
- s.down=(x,y)=>{if(s.status!=='play')return;const c=Math.floor((x-ox)/cell),r=Math.floor((y-oy)/cell);if(r<0||c<0||r>=N||c>=N)return;const i=r*N+c,br=Math.floor(b/N),bc=b%N;if(i===b||(r!==br&&c!==bc))return;
-  const step=r===br?Math.sign(c-bc):Math.sign(r-br)*N;while(b!==i&&s.moves<s.limit){const n=b+step;t[b]=t[n];t[n]=0;anim[t[b]]={from:n,a:1};b=n;s.moves++}sfx(520,.05,'triangle',.05);
-  if(solved()){s.status='win';sfx(880,.2,'triangle',.07)}else if(s.moves>=s.limit)s.status='fail'};
- s.move=()=>{};s.up=()=>{};
- s.update=dt=>{for(const k2 in anim){anim[k2].a-=dt*9;if(anim[k2].a<=0)delete anim[k2]}};
- s.draw=()=>{bframe(ox,oy,cell*N,cell*N);for(let i=0;i<N*N;i++){ctx.fillStyle='rgba(255,255,255,.06)';ctx.fillRect(ox+(i%N)*cell+2,oy+Math.floor(i/N)*cell+2,cell-4,cell-4)}
-  for(let i=0;i<N*N;i++){const v=t[i];if(!v)continue;let px=ox+(i%N)*cell,py=oy+Math.floor(i/N)*cell;const an=anim[v];if(an){const fx=ox+(an.from%N)*cell,fy=oy+Math.floor(an.from/N)*cell,a=Math.max(0,an.a);px=px+(fx-px)*a;py=py+(fy-py)*a}
-   const ok=v===i+1;block(px+2,py+2,cell-4,ok?'#3ddc84':'#3a86ff');txt(String(v),px+cell/2,py+cell/2,cell*0.42,'#fff')}};
- s.dbg=()=>({N,cell,ox,oy,hist,b:()=>b,setMoves:v=>s.moves=v});
- s.hud=()=>({label:`In place ${t.filter((v,i)=>v&&v===i+1).length} / ${N*N-1}`,p:t.filter((v,i)=>v&&v===i+1).length/(N*N-1),sub:`Moves ${s.moves} / ${s.limit}`});
- return s}
 // ---------- LIGHTS OUT ----------
 function Lights(L){
  const N=L<20?4:L<70?5:6,m=clamp(3+Math.floor(L/7),3,Math.floor(N*N*0.6));
@@ -451,20 +430,54 @@ function Nonogram(L){
  s.dbg=()=>({N,cell,gx,gy,img,setTime:v=>s.time=v});
  s.hud=()=>{const ok=g.filter((_,r)=>rowOk(r)).length+g[0].filter((_,c)=>colOk(c)).length;return{label:`Clues solved ${ok} / ${N*2}`,p:ok/(N*2),sub:timerHud(s)}};
  return s}
+// ---------- HELP OVERLAY ----------
+const HELP={
+ match3:{how:['Swipe a gem onto a neighbour, or tap one gem then a neighbour.','Mouse: click-drag or click two neighbours.','Only swaps that make a line of 3+ count.'],win:'Reach the target score.',fail:'You run out of moves first.',tip:'Matches near the bottom start chain reactions for bonus points.'},
+ blocks:{how:['Drag a piece from the tray onto the grid.','Double-tap (or double-click) a tray piece to rotate it 90°.','On touch the piece floats above your finger and snaps to the nearest fit.'],win:'Clear the required number of full rows/columns.',fail:'No tray piece fits anywhere, in any rotation.',tip:'Keep a 3×3 space open for big pieces.'},
+ bubble:{how:['Drag (or move the mouse) to aim — the dotted line shows bounces.','Release / click to fire.','3+ same-colour bubbles pop; unattached bubbles fall.'],win:'Pop every bubble.',fail:'A bubble crosses the red line.',tip:'Bank shots off the walls; a new row drops every few shots.'},
+ flow:{how:['Drag from a coloured dot to its matching dot.','Paths can\'t cross; drag over a path to cut it back.','Mouse: click-drag the same way.'],win:'Connect every pair AND fill every cell.',fail:'The timer runs out.',tip:'Start with pairs along the edges.'},
+ pairlink:{how:['Drag from a gem to the matching gem.','Paths can\'t cross each other or go through rocks.','Drag over a path to shorten it.'],win:'Connect every pair (cells can stay empty).',fail:'The timer runs out.',tip:'Route long pairs first, around the outside.'},
+ pipes:{how:['Tap (or click) a pipe to rotate it 90°.','Lit cyan pipes are connected to the green IN.'],win:'Make one connected path from IN (left) to OUT (right).',fail:'You use up all your taps.',tip:'Work outward from IN and follow the glow.'},
+ lights:{how:['Tap (or click) a square.','It flips that light AND the ones directly above, below, left and right.'],win:'Turn every light off.',fail:'You use up all your taps.',tip:'Tapping a square twice undoes it — order doesn\'t matter.'},
+ sudoku:{how:['Tap a square, then tap a number on the pad below.','⌫ clears the square. Yellow numbers are fixed.','Red numbers clash with another in the same row, column or box.'],win:'Fill the grid with no clashes.',fail:'The timer runs out.',tip:'Look for the row or box with the most numbers already filled.'},
+ mines:{how:['DIG mode: tap a square to uncover it.','Tap the MODE button to switch to FLAG and mark suspected mines.','A number = how many mines touch that square.'],win:'Uncover every safe square.',fail:'You hit mines with no lives left, or time runs out.',tip:'A "1" touching only one hidden square means that square is a mine.'},
+ hanoi:{how:['Tap a peg to lift its top disc.','Tap another peg to drop it there (tap the same peg to cancel).','A disc can never go on a smaller disc.'],win:'Move the whole stack to the green TARGET peg.',fail:'You use up all your moves.',tip:'With an odd number of discs, move the smallest disc to the target first.'},
+ maze:{how:['Press on the gem and drag it along the corridors.','It follows your finger/mouse but can\'t pass walls.'],win:'Reach the gold star EXIT (bottom right).',fail:'The timer runs out.',tip:'Trace ahead with your eyes before you drag.'},
+ nonogram:{how:['Tap a square: empty → filled → ✕ → empty.','Numbers show runs of filled squares in order, e.g. "2 1" = two filled, gap, one filled.','A clue turns green when its row/column matches.'],win:'Every row and column matches its clues.',fail:'The timer runs out.',tip:'Fill rows with big clues first — "5" in a 5-wide row fills it all.'}};
+let helpScroll=0,helpMax=0,helpDrag=null;
+function wrapLines(t,maxW,size){font(size);const words=t.split(' '),out=[];let line='';for(const w of words){const tst=line?line+' '+w:w;if(ctx.measureText(tst).width>maxW&&line){out.push(line);line=w}else line=tst}if(line)out.push(line);return out}
+function helpRect(){const s=HUDH>60?52:46;return{x:W-SA.r-8-s,y:SA.t+(HUDH-s)/2,w:s,h:s}}
+function drawHelpBtn(){const R=helpRect(),hov=ptr.type==='mouse'&&inR(ptr.x,ptr.y,R);rr(R.x,R.y,R.w,R.h,10);const g=ctx.createLinearGradient(0,R.y,0,R.y+R.h);g.addColorStop(0,hov?'#6ea8ff':'#3a86ff');g.addColorStop(1,'#1f4fb8');ctx.fillStyle=g;ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.7)';ctx.stroke();txt('?',R.x+R.w/2,R.y+R.h/2+1,R.h*0.62,'#fff');
+ ui.push({x:R.x-6,y:R.y-6,w:R.w+12,h:R.h+12,label:'?',fn:()=>{game.help=!game.help;helpScroll=0}})}
+function drawHelp(){const st=game.stage,h=HELP[game.ptype]||{how:[],win:'',fail:'',tip:''};
+ ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,0,W,H);ui.push({x:0,y:0,w:W,h:H,label:'help-outside',fn:()=>{game.help=false}});
+ const pw=Math.min(W-SA.l-SA.r-24,480),ph=Math.min(H-SA.t-SA.b-24,560),px=(W-pw)/2,py=(H-ph)/2;
+ const g=ctx.createLinearGradient(0,py,0,py+ph);g.addColorStop(0,'#26305e');g.addColorStop(1,'#141a38');rr(px,py,pw,ph,18);ctx.fillStyle=g;ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#7aa2ff';ctx.stroke();
+ ui.push({x:px,y:py,w:pw,h:ph,label:'help-panel',fn:()=>{helpDrag={y:ptr.y,s:helpScroll}}});
+ txt('HOW TO PLAY',W/2,py+30,Math.min(26,pw*0.07),'#ffd166');txt(st.name.toUpperCase(),W/2,py+58,18,'#7fe3ff','center',pw-30);
+ const bh=54,top=py+78,bot=py+ph-bh-22,iw=pw-40,fs=LAND?15:16,lh=fs*1.35;
+ const items=[['GOAL',st.goal,'#ffd166'],['HOW TO PLAY',null,'#7fe3ff'],...h.how.map(t=>['•',t,'#fff']),['WIN',h.win,'#3ddc84'],['FAIL',h.fail,'#ff5c7a'],['TIP',h.tip,'#cfd8ff']];
+ ctx.save();ctx.beginPath();ctx.rect(px+4,top,pw-8,bot-top);ctx.clip();let y=top+8-helpScroll;
+ for(const[head,body,col]of items){if(body===null){txt(head,px+20,y+lh/2,fs,col,'left');y+=lh;continue}
+  if(head==='•'){const ls=wrapLines(body,iw-18,fs);ls.forEach((l,k)=>{if(k===0)txt('•',px+24,y+lh/2,fs,'#7fe3ff','left');txt(l,px+40,y+lh/2,fs,'#fff','left');y+=lh});y+=2;continue}
+  txt(head,px+20,y+lh/2,fs,col,'left');y+=lh;const ls=wrapLines(body,iw,fs);ls.forEach(l=>{txt(l,px+20,y+lh/2,fs,'#fff','left');y+=lh});y+=6}
+ ctx.restore();helpMax=Math.max(0,y+helpScroll-(bot-top)-top);helpScroll=clamp(helpScroll,0,helpMax);
+ if(helpMax>0){const tr=(bot-top)*(bot-top)/(bot-top+helpMax);ctx.fillStyle='rgba(255,255,255,.35)';rr(px+pw-10,top+(bot-top-tr)*(helpScroll/helpMax),5,tr,3);ctx.fill();if(helpScroll<helpMax-2)txt('▼ scroll',W/2,bot-8,12,'#cfd8ff')}
+ button(W/2-100,py+ph-bh-14,200,bh,'GOT IT','#3ddc84',()=>{game.help=false})}
 // ---------- game flow ----------
-const game={state:'menu',level:1,phase:'puzzle',stage:null,paused:false,ptype:null,endT:0,win:false,winT:0};
-const PUZ=['match3','blocks','bubble','flow','pairlink','pipes','slider','lights','sudoku','mines','hanoi','maze','nonogram'];
-const PUZF={match3:Match3,blocks:Blocks,bubble:Bubble,flow:Flow,pairlink:PairLink,pipes:Pipes,slider:Slider,lights:Lights,sudoku:Sudoku,mines:Mines,hanoi:Hanoi,maze:Maze,nonogram:Nonogram};
+const game={help:false,state:'menu',level:1,phase:'puzzle',stage:null,paused:false,ptype:null,endT:0,win:false,winT:0};
+const PUZ=['match3','blocks','bubble','flow','pairlink','pipes','lights','sudoku','mines','hanoi','maze','nonogram'];
+const PUZF={match3:Match3,blocks:Blocks,bubble:Bubble,flow:Flow,pairlink:PairLink,pipes:Pipes,lights:Lights,sudoku:Sudoku,mines:Mines,hanoi:Hanoi,maze:Maze,nonogram:Nonogram};
 function sanitizeSave(){save.max=clamp(parseInt(save.max)||1,1,100);save.cur=clamp(parseInt(save.cur)||1,1,100);if(!Array.isArray(save.bag))save.bag=[];save.bag=save.bag.filter(t=>PUZ.includes(t));if(!PUZ.includes(save.lastP))delete save.lastP;for(const k of['phase','stage'])delete save[k];persist()}
 sanitizeSave();
-const HINTS={match3:'Swap neighbours to match 3+',blocks:'Drag pieces onto the grid · double-tap to rotate',bubble:'Aim & release to fire',flow:'Drag from a dot: connect pairs, fill every cell',pairlink:'Drag paths between matching gems · avoid rocks',pipes:'Tap a pipe to rotate it',slider:'Tap a tile next to (or in line with) the gap',lights:'Tapping a light flips it and its neighbours',sudoku:'Tap a square, then a number below',mines:'Numbers count nearby mines · toggle DIG / FLAG',hanoi:'Tap a peg to lift its top disc, tap another to drop it',maze:'Drag the gem through the maze',nonogram:'Tap: fill → ✕ → empty. Clues are runs of filled squares'};
-function startLevel(L,phase='puzzle',type){phase='puzzle';if(type&&!PUZ.includes(type))type=undefined;L=clamp(L,1,100);game.level=L;save.cur=L;persist();game.phase=phase;game.paused=false;game.endT=0;parts=[];texts=[];
+const HINTS={match3:'Swap neighbours to match 3+',blocks:'Drag pieces onto the grid · double-tap to rotate',bubble:'Aim & release to fire',flow:'Drag from a dot: connect pairs, fill every cell',pairlink:'Drag paths between matching gems · avoid rocks',pipes:'Tap a pipe to rotate it',lights:'Tapping a light flips it and its neighbours',sudoku:'Tap a square, then a number below',mines:'Numbers count nearby mines · toggle DIG / FLAG',hanoi:'Tap a peg to lift its top disc, tap another to drop it',maze:'Drag the gem through the maze',nonogram:'Tap: fill → ✕ → empty. Clues are runs of filled squares'};
+function startLevel(L,phase='puzzle',type){game.help=false;phase='puzzle';if(type&&!PUZ.includes(type))type=undefined;L=clamp(L,1,100);game.level=L;save.cur=L;persist();game.phase=phase;game.paused=false;game.endT=0;parts=[];texts=[];
  if(phase==='puzzle'){if(type){game.ptype=type}else{if(Array.isArray(save.bag))save.bag=save.bag.filter(t=>PUZ.includes(t));if(!Array.isArray(save.bag)||!save.bag.length){save.bag=PUZ.slice().sort(()=>Math.random()-0.5);if(save.bag[0]===save.lastP&&save.bag.length>1)[save.bag[0],save.bag[1]]=[save.bag[1],save.bag[0]]}game.ptype=save.bag.shift();save.lastP=game.ptype;persist()}game.stage=PUZF[game.ptype](L)}else game.stage=Shoot(L);
  game.stage.layout();game.state='intro'}
 function stageEnd(win){game.win=win;game.state='result';
  if(win){if(true){save.max=Math.max(save.max,Math.min(100,game.level+1));if(game.level>=100){persist();startWin();return}save.cur=game.level+1;persist()}[523,659,784,1047].forEach((f,i)=>setTimeout(()=>sfx(f,0.2,'triangle',0.07),i*90))}
  else[300,240,180].forEach((f,i)=>setTimeout(()=>sfx(f,0.25,'sawtooth',0.05),i*140))}
-function toMenu(){game.state='menu';game.paused=false;parts=[];texts=[]}
+function toMenu(){game.help=false;game.state='menu';game.paused=false;parts=[];texts=[]}
 let rockets=[];
 function startWin(){game.state='win';game.winT=0;parts=[];texts=[];rockets=[];save.cur=100;persist()}
 // ---------- screens ----------
@@ -489,7 +502,7 @@ function drawSelect(){drawBG();const C=LAND?20:10,Rw=100/C,top=SA.t+(LAND?44:70)
  for(let i=0;i<100;i++){const L=i+1,x=ox+(i%C)*s+gap/2,y=oy+Math.floor(i/C)*s+gap/2,w=s-gap;if(L<=save.max)button(x,y,w,w,String(L),L===100?'#ff7a00':'#3a86ff',()=>startLevel(L));else{rr(x,y,w,w,w*0.3);ctx.fillStyle='rgba(255,255,255,.08)';ctx.fill();ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=1;ctx.stroke();txt(String(L),x+w/2,y+w/2,w*0.32,'rgba(255,255,255,.3)')}}
  button(W/2-100,Math.min(BOT-64,oy+s*Rw+12),200,56,'BACK','#ff3b5c',toMenu)}
 function drawHUD(){const st=game.stage,h=st.hud();ctx.save();ctx.translate(0,SA.t);const g=ctx.createLinearGradient(0,-SA.t,0,HUDH);g.addColorStop(0,'rgba(8,10,30,.96)');g.addColorStop(1,'rgba(20,24,60,.9)');ctx.fillStyle=g;ctx.fillRect(0,-SA.t,W,HUDH+SA.t);ctx.fillStyle='#5d7bff';ctx.fillRect(0,HUDH-2,W,2);
- const L0=SA.l+70,R0=W-SA.r-50,mw=R0-L0,cx=(L0+R0)/2,big=HUDH>60;txt(`LEVEL ${game.level}  ·  ${st.name.toUpperCase()}`,cx,HUDH*0.22,big?18:16,'#ffd166','center',mw);txt(`${h.label}   ·   ${h.sub}`,cx,HUDH*0.52,big?17:15,'#ffffff','center',mw);
+ const L0=SA.l+70,R0=W-SA.r-(HUDH>60?70:62),mw=R0-L0,cx=(L0+R0)/2,big=HUDH>60;txt(`LEVEL ${game.level}  ·  ${st.name.toUpperCase()}`,cx,HUDH*0.22,big?18:16,'#ffd166','center',mw);txt(`${h.label}   ·   ${h.sub}`,cx,HUDH*0.52,big?17:15,'#ffffff','center',mw);
  const bw=Math.min(mw,380),x=cx-bw/2,y=HUDH*0.74;rr(x,y,bw,9,4.5);ctx.fillStyle='rgba(255,255,255,.15)';ctx.fill();const p=clamp(h.p,0,1);if(p>0){rr(x,y,Math.max(9,bw*p),9,4.5);const pg=ctx.createLinearGradient(x,0,x+bw,0);pg.addColorStop(0,'#3ddc84');pg.addColorStop(1,'#ffd166');ctx.fillStyle=pg;ctx.fill()}
  ctx.restore()}
 function drawX(){const s=HUDH>60?52:46,x=SA.l+8,y=SA.t+(HUDH-s)/2;const hov=ptr.type==='mouse'&&inR(ptr.x,ptr.y,{x,y,w:s,h:s});rr(x,y,s,s,10);const g=ctx.createLinearGradient(0,y,0,y+s);g.addColorStop(0,hov?'#ff6b84':'#ff3b5c');g.addColorStop(1,'#a3001f');ctx.fillStyle=g;ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.7)';ctx.stroke();ctx.lineCap='square';ctx.lineWidth=5;ctx.strokeStyle='#fff';const m=s*0.32;ctx.beginPath();ctx.moveTo(x+m,y+m);ctx.lineTo(x+s-m,y+s-m);ctx.moveTo(x+s-m,y+m);ctx.lineTo(x+m,y+s-m);ctx.stroke();ctx.lineCap='butt';ui.push({x:x-6,y:y-6,w:s+12,h:s+12,fn:()=>{game.paused=!game.paused}})}
@@ -523,19 +536,20 @@ const pt=e=>{const r=cv.getBoundingClientRect();ptr.x=e.clientX-r.left;ptr.y=e.c
 const inGame=()=>['intro','play','result'].includes(game.state);
 cv.addEventListener('pointerdown',e=>{e.preventDefault();if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(_){}}pt(e);ptr.down=true;try{cv.setPointerCapture(e.pointerId)}catch(_){}
  for(let i=ui.length-1;i>=0;i--){const b=ui[i];if(inR(ptr.x,ptr.y,b)){sfx(660,0.06,'triangle',0.06);b.fn();return}}
- if(!game.paused&&game.state==='play'&&game.stage)game.stage.down(ptr.x,ptr.y)});
-cv.addEventListener('pointermove',e=>{pt(e);if(!game.paused&&game.state==='play'&&game.stage)game.stage.move(ptr.x,ptr.y)});
-const up=e=>{pt(e);ptr.down=false;if(!game.paused&&game.state==='play'&&game.stage)game.stage.up(ptr.x,ptr.y)};
+ if(!game.help&&!game.paused&&game.state==='play'&&game.stage)game.stage.down(ptr.x,ptr.y)});
+cv.addEventListener('wheel',e=>{if(game.help){helpScroll=clamp(helpScroll+e.deltaY,0,helpMax);e.preventDefault()}},{passive:false});
+cv.addEventListener('pointermove',e=>{pt(e);if(game.help){if(helpDrag&&ptr.down)helpScroll=clamp(helpDrag.s-(ptr.y-helpDrag.y),0,helpMax);return}if(!game.paused&&game.state==='play'&&game.stage)game.stage.move(ptr.x,ptr.y)});
+const up=e=>{pt(e);ptr.down=false;helpDrag=null;if(game.help)return;if(!game.paused&&game.state==='play'&&game.stage)game.stage.up(ptr.x,ptr.y)};
 cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
 addEventListener('keydown',e=>{if(e.key==='Escape'&&inGame())game.paused=!game.paused});
 cv.addEventListener('contextmenu',e=>e.preventDefault());document.addEventListener('visibilitychange',()=>{if(document.hidden&&game.state==='play')game.paused=true});
 let last=performance.now();
 function frame(now){const dt=Math.min(0.05,(now-last)/1000);last=now;T+=dt;ui=[];ctx.setTransform(DPR,0,0,DPR,0,0);
  if(game.state==='menu')drawMenu();else if(game.state==='select')drawSelect();else if(game.state==='win')drawWin(dt);
- else{const st=game.stage;if(game.state==='play'&&!game.paused){st.update(dt);if(st.status!=='play'){game.endT+=dt;if(game.endT>0.9){game.endT=0;stageEnd(st.status==='win')}}}
+ else{const st=game.stage;if(game.state==='play'&&!game.paused&&!game.help){st.update(dt);if(st.status!=='play'){game.endT+=dt;if(game.endT>0.9){game.endT=0;stageEnd(st.status==='win')}}}
   if(game.phase==='puzzle')drawBG();st.draw()}
- updParts(game.paused?0:dt);drawParts();
- if(inGame()){const st=game.stage;if(st.drawTop)st.drawTop();drawHUD();if(!game.paused){if(game.state==='intro')drawIntro();else if(game.state==='result')drawResult()}else drawPause();drawX()}
+ updParts(game.paused||game.help?0:dt);drawParts();
+ if(inGame()){const st=game.stage;if(st.drawTop)st.drawTop();drawHUD();if(!game.paused){if(game.state==='intro')drawIntro();else if(game.state==='result')drawResult()}else drawPause();drawX();drawHelpBtn();if(game.help)drawHelp()}
  cv.style.cursor='default';
  requestAnimationFrame(frame)}
 resize();
